@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WXL Video Cinema</title>
+  <style>
+    :root { color-scheme: dark; font-family: Segoe UI, Arial, sans-serif; background: #080a0f; color: #f5f7fb; }
+    body { margin: 0; min-height: 100vh; display: grid; grid-template-rows: auto 1fr; background: radial-gradient(circle at top, #27314a, #080a0f 58%); }
+    header { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #3d4962; background: #101522ee; }
+    strong { white-space: nowrap; color: #f44336; letter-spacing: .04em; }
+    input { min-width: 0; flex: 1; padding: 9px 11px; border: 1px solid #53627e; border-radius: 4px; color: inherit; background: #060911; }
+    button { padding: 9px 13px; border: 1px solid #ef4337; border-radius: 4px; color: #fff; background: #bc251f; font-weight: 600; cursor: pointer; }
+    button:hover { background: #e2342b; }
+    main { position: relative; min-height: 0; display: grid; place-items: center; padding: 10px; }
+    #stage { width: min(100%, calc((100vh - 86px) * 1.7777)); aspect-ratio: 16 / 9; overflow: hidden; background: #000; box-shadow: 0 18px 50px #000c; }
+    iframe { width: 100%; height: 100%; border: 0; }
+    #empty { display: grid; place-items: center; width: 100%; height: 100%; color: #9dabc4; text-align: center; line-height: 1.5; }
+    #error { min-height: 1.1em; margin: 0; padding: 0 12px 8px; color: #ff9b91; background: #101522ee; }
+    #show-controls { display: none; position: fixed; z-index: 10; top: 8px; left: 8px; opacity: 0; transition: opacity .15s; }
+    body.playing { grid-template-rows: 1fr; background: #000; }
+    body.playing header, body.playing #error { display: none; }
+    body.playing main { padding: 0; }
+    body.playing #stage { width: 100%; height: 100%; aspect-ratio: auto; box-shadow: none; }
+    body.playing #show-controls { display: block; }
+    body.playing #show-controls:hover, body.playing #show-controls:focus { opacity: 1; }
+  </style>
+</head>
+<body>
+  <button id="show-controls" type="button">Controls</button>
+  <header>
+    <strong>WXL CINEMA</strong>
+    <input id="url" spellcheck="false" autocomplete="off" placeholder="Paste a YouTube link or 11-character video ID">
+    <button id="play" type="button">Play</button>
+    <button id="full" type="button">Fullscreen</button>
+  </header>
+  <p id="error" aria-live="polite"></p>
+  <main>
+    <div id="stage"><div id="empty">Paste a normal YouTube URL above, then press Play.<br>Playback and audio use YouTube's official embedded player.</div></div>
+  </main>
+  <script>
+    const input = document.getElementById('url');
+    const stage = document.getElementById('stage');
+    const error = document.getElementById('error');
+    let player = null;
+    let apiReady = false;
+    let pendingVideoId = null;
+    let pendingVolume = 80;
+    const saved = localStorage.getItem('wxl-video-cinema-last-url');
+    if (saved) input.value = saved;
+
+    function videoId(raw) {
+      const value = raw.trim();
+      if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
+      let url;
+      try { url = new URL(value); } catch (_) { return null; }
+      const host = url.hostname.toLowerCase().replace(/^www\./, '');
+      if (host === 'youtu.be') return url.pathname.split('/').filter(Boolean)[0] || null;
+      if (host !== 'youtube.com' && host !== 'm.youtube.com' && host !== 'youtube-nocookie.com') return null;
+      if (url.pathname === '/watch') return url.searchParams.get('v');
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts[0] === 'embed' || parts[0] === 'shorts' || parts[0] === 'live') return parts[1] || null;
+      return null;
+    }
+
+    function createPlayer(id) {
+      pendingVideoId = id;
+      if (!apiReady) {
+        stage.innerHTML = '<div id="empty">Starting the YouTube player…</div>';
+        return;
+      }
+      if (player && typeof player.destroy === 'function') player.destroy();
+      stage.innerHTML = '<div id="youtube-player"></div>';
+      player = new YT.Player('youtube-player', {
+        width: '100%',
+        height: '100%',
+        videoId: id,
+        playerVars: {
+          autoplay: 1,
+          controls: 1,
+          rel: 0,
+          playsinline: 1,
+          origin: 'https://wxl-video.local',
+          widget_referrer: 'https://wxl-video.local/'
+        },
+        events: {
+          onReady: event => {
+            event.target.setVolume(pendingVolume);
+            event.target.playVideo();
+          },
+          onError: event => {
+            error.textContent = `YouTube player error ${event.data}. Try another embeddable video.`;
+            document.body.classList.remove('playing');
+          }
+        }
+      });
+      document.body.classList.add('playing');
+    }
+
+    function play() {
+      const id = videoId(input.value);
+      if (!id || !/^[A-Za-z0-9_-]{11}$/.test(id)) {
+        error.textContent = 'Use a normal youtube.com, youtu.be, Shorts, Live, Embed link, or an 11-character video ID.';
+        return;
+      }
+      error.textContent = '';
+      localStorage.setItem('wxl-video-cinema-last-url', input.value.trim());
+      createPlayer(id);
+    }
+
+    window.onYouTubeIframeAPIReady = () => {
+      apiReady = true;
+      if (pendingVideoId) createPlayer(pendingVideoId);
+    };
+    window.wxlLoadFromNative = raw => {
+      input.value = String(raw || '');
+      play();
+      return true;
+    };
+    window.wxlPlayerCommand = command => {
+      if (!player) return false;
+      if (command === 'play' && player.playVideo) player.playVideo();
+      else if (command === 'pause' && player.pauseVideo) player.pauseVideo();
+      else if (command === 'stop' && player.stopVideo) player.stopVideo();
+      else return false;
+      return true;
+    };
+    window.wxlSetVolume = value => {
+      pendingVolume = Math.max(0, Math.min(100, Number(value) || 0));
+      if (player && player.setVolume) player.setVolume(pendingVolume);
+      return pendingVolume;
+    };
+
+    document.getElementById('play').addEventListener('click', play);
+    input.addEventListener('keydown', event => { if (event.key === 'Enter') play(); });
+    document.getElementById('full').addEventListener('click', () => stage.requestFullscreen?.());
+    document.getElementById('show-controls').addEventListener('click', () => document.body.classList.remove('playing'));
+
+    const apiScript = document.createElement('script');
+    apiScript.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(apiScript);
+  </script>
+</body>
+</html>

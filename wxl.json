@@ -1,0 +1,27 @@
+{
+  "manifest": 1,
+  "extension": {
+    "id": "wxl-video-screen",
+    "version": "0.4.0",
+    "abi": "1.1",
+    "entry": "wxl-video-screen.dll",
+    "assets": ["wxl-video-host.exe", "player.html"],
+    "requires": {},
+    "conflicts": [],
+    "hooks": []
+  },
+  "deploy": {
+    "mode": "release",
+    "match": "wxl-video-screen-*.zip"
+  },
+  "listing": {
+    "title": "Video Cinema",
+    "tagline": "Place an official YouTube player on a physical world-space screen.",
+    "description": "README.md",
+    "gallery": [],
+    "categories": ["tools", "media"],
+    "accent": "#c4302b"
+  },
+  "license": "GPL-3.0-or-later",
+  "signature": null
+}

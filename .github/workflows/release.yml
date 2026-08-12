@@ -1,0 +1,90 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wxl-video-screen-release
+  cancel-in-progress: false
+
+env:
+  EXT_NAME: wxl-video-screen
+  CORE_REPO: WarcraftXL/wxl-core
+  CORE_REF: v1.1
+  WEBVIEW2_VERSION: 1.0.4129.50
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out this extension
+        uses: actions/checkout@v4
+        with:
+          path: ext
+
+      - name: Check out wxl-core
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CORE_REPO }}
+          ref: ${{ env.CORE_REF }}
+          submodules: recursive
+          path: core
+
+      - name: Add the extension source to wxl-core
+        shell: pwsh
+        run: |
+          $destination = "core/extensions/$env:EXT_NAME"
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          Copy-Item -Path 'ext/extension/*' -Destination $destination -Recurse -Force
+
+      - name: Configure the Win32 extension build
+        shell: pwsh
+        run: cmake -S core -B core/build -A Win32
+
+      - name: Build the extension DLL
+        shell: pwsh
+        run: cmake --build core/build --config Release --target $env:EXT_NAME --parallel
+
+      - name: Download the pinned WebView2 SDK for the helper build
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'webview2.zip'
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/$env:WEBVIEW2_VERSION" -OutFile $archive
+          $destination = "ext/host/third_party/webview2/Microsoft.Web.WebView2.$env:WEBVIEW2_VERSION"
+          New-Item -ItemType Directory -Force -Path $destination | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+
+      - name: Build the Win32 helper
+        shell: pwsh
+        run: |
+          cmake -S ext/host -B ext/host/build -A Win32
+          cmake --build ext/host/build --config Release --target wxl-video-host --parallel
+
+      - name: Read version and build the Hub ZIP
+        id: package
+        shell: pwsh
+        run: |
+          $version = (Get-Content ext/wxl.json -Raw | ConvertFrom-Json).extension.version
+          if (-not $version) { throw 'wxl.json has no extension.version' }
+          $stage = 'stage'
+          $archive = "dist/$env:EXT_NAME-$version.zip"
+          New-Item -ItemType Directory -Force -Path $stage, 'dist' | Out-Null
+          Copy-Item "core/build/Release/$env:EXT_NAME.dll" "$stage/$env:EXT_NAME.dll"
+          Copy-Item 'ext/host/build/Release/wxl-video-host.exe' "$stage/wxl-video-host.exe"
+          Copy-Item 'ext/player.html', 'ext/wxl.json', 'ext/README.md', 'ext/LICENSE', 'ext/THIRD_PARTY_NOTICES.md' -Destination $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+
+      - name: Publish the Hub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.package.outputs.version }}
+          name: Video Cinema ${{ steps.package.outputs.version }}
+          body: Hub package built from ${{ github.sha }}.
+          files: ${{ steps.package.outputs.archive }}
