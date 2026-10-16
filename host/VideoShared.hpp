@@ -7,12 +7,15 @@
 
 namespace wxl_video_shared
 {
-    constexpr wchar_t kMappingName[] = L"Local\\WXLVideoCinemaFrames-v1";
-    constexpr wchar_t kControlMappingName[] = L"Local\\WXLVideoCinemaControl-v1";
+    // Stonewall TV build: 1280x720 frames (stock: 640x360), under names of its own. The stock names are shared with
+    // AzerothPlex (its frames and control blocks are named WXLVideoCinema*-v1 too), so with both running each read
+    // the other's; and an old helper with this extension (or the other way round) never opens a mapping of another size.
+    constexpr wchar_t kMappingName[] = L"Local\\WXLStonewallTvFrames-v1";
+    constexpr wchar_t kControlMappingName[] = L"Local\\WXLStonewallTvControl-v1";
     constexpr uint32_t kMagic = 0x46565857u; // "WXVF"
-    constexpr uint32_t kVersion = 1;
-    constexpr uint32_t kWidth = 640;
-    constexpr uint32_t kHeight = 360;
+    constexpr uint32_t kVersion = 2;
+    constexpr uint32_t kWidth = 1280;
+    constexpr uint32_t kHeight = 720;
     constexpr uint32_t kStride = kWidth * 4;
     constexpr uint32_t kFrameBytes = kStride * kHeight;
     constexpr uint32_t kControlMagic = 0x43565857u; // "WXVC"

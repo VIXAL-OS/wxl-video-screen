@@ -41,6 +41,6 @@ int __cdecl WXL_Load(const WXL_Api* api)
 
     api->UiAddPanel("Video Cinema", &DrawPanel, nullptr);
     api->Log(WXL_LOG_INFO, kTag,
-             "0.3.9 loaded: pre-world physical screen + parent-bound helper");
+             "0.4.0 + Stonewall TV loaded: 1280x720 frames, CyTube channels, rainbow and neon sign option");
     return 1;
 }

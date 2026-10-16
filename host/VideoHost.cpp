@@ -29,7 +29,7 @@ namespace
     constexpr wchar_t kVirtualHost[] = L"wxl-video.local";
     constexpr wchar_t kPlayerUrl[] = L"https://wxl-video.local/player.html";
     constexpr UINT_PTR kCaptureTimer = 1;
-    constexpr UINT kCaptureIntervalMs = 67; // Up to 15 shared frames per second.
+    constexpr UINT kCaptureIntervalMs = 33; // Up to 30 shared frames per second (JPEG: cheaper to encode and decode than PNG).
     constexpr UINT kShowHostMessage = WM_APP + 0x45;
     constexpr UINT kHideHostMessage = WM_APP + 0x46;
 
@@ -330,7 +330,7 @@ namespace
 
         g_captureInFlight = true;
         const HRESULT result = g_webview->CapturePreview(
-            COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG, stream.Get(),
+            COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_JPEG, stream.Get(),
             Callback<ICoreWebView2CapturePreviewCompletedHandler>(
                 [stream](HRESULT captureResult) -> HRESULT {
                     if (SUCCEEDED(captureResult))

@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.20)
+project(StonewallArtPreview LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+add_executable(art_preview art_preview.cpp)
+target_include_directories(art_preview PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../extension/src")
+target_compile_definitions(art_preview PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+target_link_libraries(art_preview PRIVATE gdi32 user32)

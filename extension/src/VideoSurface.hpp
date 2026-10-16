@@ -53,6 +53,10 @@ namespace wxl_video_screen
         bool UploadLatestFrame(IDirect3DDevice9* device);
         void ReleaseTexture();
         void DrawWorldScreen(IDirect3DDevice9* device, void* sceneDepth, bool beforeWorld);
+        // Stonewall TV: a neon "Stonewall TV" sign above the screen, its rainbow glittering.
+        void DrawStonewall(IDirect3DDevice9* device, void* sceneDepth);
+        bool EnsureStonewallTextures(IDirect3DDevice9* device);
+        void ReleaseStonewallTextures();
         std::wstring ExtensionDirectory() const;
 
         const WXL_Api* api_ = nullptr;
@@ -75,6 +79,16 @@ namespace wxl_video_screen
         float projectedClipW_ = 0.0f;
         IDirect3DDevice9* textureDevice_ = nullptr;
         IDirect3DTexture9* texture_ = nullptr;
+        bool textureMipmapped_ = false;
+        IDirect3DDevice9* stonewallDevice_ = nullptr;
+        IDirect3DTexture9* signTexture_ = nullptr;   // the rainbow and "Stonewall"
+        IDirect3DTexture9* tvTexture_ = nullptr;     // "TV" (its own layer: it flickers)
+        IDirect3DTexture9* sparkleTexture_ = nullptr;
+        float signSplit_ = 0.75f;
+        float signArc_[5]{};      // the rainbow on the sign: arc centre u, v; band radii; where it goes behind the S (radians)
+        float signCenter_ = 0.5f; // the design's middle (u)
+        float signAspect_ = 0.25f; // the sign texture's height / width
+        bool stonewallFailed_ = false;
         std::vector<uint8_t> frameScratch_;
 
         bool initialized_ = false;
@@ -82,6 +96,7 @@ namespace wxl_video_screen
         int visible_ = 1;
         int depthTest_ = 1;
         int outline_ = 0;
+        int stonewall_ = 0;
         float depthBias_ = -0.010f;
         int spatialAudio_ = 1;
         int masterVolume_ = 80;
