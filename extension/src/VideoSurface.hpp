@@ -28,6 +28,7 @@ namespace wxl_video_screen
         static void __cdecl SceneClearHook(uint32_t flags, uint32_t colour);
 
         void OnFrame(const wxl::events::FrameArgs& args);
+        void OnWorldRender(const wxl::events::WorldRenderArgs& args);
         void OnWorldSceneEnd(const wxl::events::WorldSceneEndArgs& args);
         void OnUpdate(const wxl::events::UpdateArgs& args);
         void OnInput(const wxl::events::InputArgs& args);
@@ -74,6 +75,11 @@ namespace wxl_video_screen
         DWORD lastDrawFailureLog_ = 0;
         bool loggedFirstWorldScene_ = false;
         bool preWorldDrawn_ = false;
+        bool inWorldPass_ = false;             // between OnWorldRender and OnWorldSceneEnd
+        const void* worldPassDepth_ = nullptr; // the depth surface bound at OnWorldRender (compared, never used)
+        uint64_t worldRenderEvents_ = 0;
+        unsigned gateMisses_ = 0;              // world passes in a row without the pre-world screen (depth mode)
+        bool gateOff_ = false;
         bool projectedCenterValid_ = false;
         float projectedCenter_[3]{};
         float projectedClipW_ = 0.0f;
