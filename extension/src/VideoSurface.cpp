@@ -50,6 +50,35 @@ namespace wxl_video_screen
             float u, v;
         };
 
+        // The world pass's own projection and depth range (Living Azeroth verified both in the client, 2026-10-02; the
+        // disassembly agrees):
+        //  - the graphics device keeps the projection it was GIVEN at +0xF88 (what gfx::SceneMatrices returns) and the
+        //    one it RENDERS with at +0xFC8: its set-projection routine 0x6A9B40 recomputes the depth terms (stored at
+        //    0x6A9CED), and the shader system (0x872C10) hands the world that one. The same x and y, so the same place
+        //    on screen; but a depth that isn't the world's, so the screen and the characters in front of it were
+        //    compared by two different measures.
+        //  - the world render (0x4F8EA0) sets viewport z = 0..[0xADEEE4] (a static 0.94) at 0x4F905A, before the scene
+        //    render's own clear (0x79AB9A, where the pre-world screen is drawn), and puts 0..1 back before
+        //    OnWorldSceneEnd. With 0..1 at the end of the scene everything is ~6% further than the world drawn there.
+        constexpr size_t kDeviceRenderProjection = 0xFC8;
+        constexpr uintptr_t kWorldPassMaxZ = 0x00ADEEE4;
+
+        bool RenderProjection(float projection[16])
+        {
+            const void* graphics = wxl::game::gx::RawGraphicsDevice();
+            if (!graphics) return false;
+            std::memcpy(projection, static_cast<const uint8_t*>(graphics) + kDeviceRenderProjection, 16 * sizeof(float));
+            for (int i = 0; i < 16; ++i)
+                if (!std::isfinite(projection[i])) return false;
+            return projection[11] != 0.0f; // a perspective (w = view z), as the world's always is
+        }
+
+        float WorldPassMaxZ()
+        {
+            const float z = *reinterpret_cast<const volatile float*>(kWorldPassMaxZ);
+            return std::isfinite(z) && z > 0.5f && z <= 1.0f ? z : 1.0f;
+        }
+
         IDirect3DTexture9* MakeTexture(IDirect3DDevice9* device, int w, int h, const std::vector<uint32_t>& pixels)
         {
             IDirect3DTexture9* texture = nullptr;
@@ -542,7 +571,13 @@ namespace wxl_video_screen
             texture_->Release();
             texture_ = nullptr;
         }
+        if (stagingTexture_)
+        {
+            stagingTexture_->Release();
+            stagingTexture_ = nullptr;
+        }
         textureDevice_ = nullptr;
+        textureMipmapped_ = false;
         lastFrameSequence_ = 0;
     }
 
@@ -564,24 +599,37 @@ namespace wxl_video_screen
             ReleaseTexture();
         if (!texture_)
         {
-            // Mipmapped where the device can (a 1280-wide picture shimmers from afar without), plain otherwise.
-            textureMipmapped_ = SUCCEEDED(device->CreateTexture(wxl_video_shared::kWidth, wxl_video_shared::kHeight,
-                                                                0, D3DUSAGE_DYNAMIC | D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8,
-                                                                D3DPOOL_DEFAULT, &texture_, nullptr)) && texture_;
-            if (!textureMipmapped_ &&
-                (FAILED(device->CreateTexture(wxl_video_shared::kWidth, wxl_video_shared::kHeight,
-                                              1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8,
-                                              D3DPOOL_DEFAULT, &texture_, nullptr)) || !texture_))
+            // Mipmapped where the device can (a 1280-wide picture shimmers from afar without): each frame goes into a
+            // system-memory texture and UpdateTexture hands it to a default-pool AUTOGENMIPMAP one, which makes its levels
+            // on the GPU. Not a DYNAMIC | AUTOGENMIPMAP texture locked with DISCARD (the Stonewall build until now): on
+            // this machine's GeForce GTX 1660 SUPER and Radeon both, its levels are made once, from the first frame,
+            // and never again (scratchpad vc-miptest, 2026-10-17) -- and the first frame is the helper's dark page, so
+            // the screen showed black wherever it was smaller than 1280 pixels across, i.e. nearly always.
+            const UINT width = wxl_video_shared::kWidth, height = wxl_video_shared::kHeight;
+            HRESULT made = device->CreateTexture(width, height, 0, D3DUSAGE_AUTOGENMIPMAP, D3DFMT_A8R8G8B8,
+                                                 D3DPOOL_DEFAULT, &texture_, nullptr);
+            if (SUCCEEDED(made) && made != D3DOK_NOAUTOGEN && texture_)
+                made = device->CreateTexture(width, height, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM,
+                                             &stagingTexture_, nullptr);
+            textureMipmapped_ = SUCCEEDED(made) && made != D3DOK_NOAUTOGEN && texture_ && stagingTexture_;
+            if (!textureMipmapped_)
             {
-                texture_ = nullptr;
-                status_ = "D3D9 could not create the world-screen texture.";
-                return false;
+                // One level, no mipmaps, locked directly (stock Video Cinema and Azeroth Plex).
+                ReleaseTexture();
+                if (FAILED(device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8,
+                                                 D3DPOOL_DEFAULT, &texture_, nullptr)) || !texture_)
+                {
+                    texture_ = nullptr;
+                    status_ = "D3D9 could not create the world-screen texture.";
+                    return false;
+                }
             }
             textureDevice_ = device;
         }
 
+        IDirect3DTexture9* const target = textureMipmapped_ ? stagingTexture_ : texture_;
         D3DLOCKED_RECT locked{};
-        if (FAILED(texture_->LockRect(0, &locked, nullptr, D3DLOCK_DISCARD)))
+        if (FAILED(target->LockRect(0, &locked, nullptr, textureMipmapped_ ? 0 : D3DLOCK_DISCARD)))
             return false;
         const auto* source = frameScratch_.data();
         auto* destination = static_cast<uint8_t*>(locked.pBits);
@@ -589,8 +637,12 @@ namespace wxl_video_screen
             std::memcpy(destination + size_t(row) * locked.Pitch,
                         source + size_t(row) * wxl_video_shared::kStride,
                         wxl_video_shared::kStride);
-        texture_->UnlockRect(0);
-        if (textureMipmapped_) texture_->GenerateMipSubLevels();
+        target->UnlockRect(0);
+        if (textureMipmapped_)
+        {
+            if (FAILED(device->UpdateTexture(stagingTexture_, texture_))) return false;
+            texture_->GenerateMipSubLevels();
+        }
         lastFrameSequence_ = before;
 
         char message[128]{};
@@ -650,10 +702,17 @@ namespace wxl_video_screen
             }
             return;
         }
-        IDirect3DSurface9* oldDepth = nullptr;
-        device->GetDepthStencilSurface(&oldDepth);
+        // Depth-tested only before the world: the freshly cleared depth is seeded with the screen, and nearer characters
+        // and props then draw over it. At the end of the scene (only the through-world mode draws there) it isn't, and
+        // the depth surface is left alone (Azeroth Plex 754023c: the world text batch is drawn straight after).
         auto* sceneDepth = static_cast<IDirect3DSurface9*>(sceneDepthRaw);
-        if (sceneDepth) device->SetDepthStencilSurface(sceneDepth);
+        const bool depthTested = sceneDepth && beforeWorld;
+        IDirect3DSurface9* oldDepth = nullptr;
+        if (depthTested)
+        {
+            device->GetDepthStencilSurface(&oldDepth);
+            device->SetDepthStencilSurface(sceneDepth);
+        }
 
         // Build 12340 creates a pure D3D9 device, so GetTransform is unavailable.  Use WarcraftXL's
         // exact scene-matrix bank while the world-scene-end event still owns it.  Camera globals are
@@ -671,11 +730,28 @@ namespace wxl_video_screen
         D3DMATRIX projection{};
         if (!wxl::game::gfx::SceneMatrices(&view._11, &projection._11))
         {
-            device->SetDepthStencilSurface(oldDepth);
-            if (oldDepth) oldDepth->Release();
+            if (depthTested)
+            {
+                device->SetDepthStencilSurface(oldDepth);
+                if (oldDepth) oldDepth->Release();
+            }
             state->Apply();
             state->Release();
             return;
+        }
+        // The projection the world is rendered with, not the one it was given (see RenderProjection): the same place
+        // on screen either way, but only this one gives the world's depth.
+        float rendered[16];
+        if (RenderProjection(rendered)) std::memcpy(&projection._11, rendered, sizeof(rendered));
+        if (depthTested)
+        {
+            D3DVIEWPORT9 viewport{};
+            if (SUCCEEDED(device->GetViewport(&viewport)))
+            {
+                viewport.MinZ = 0.0f;
+                viewport.MaxZ = WorldPassMaxZ();
+                device->SetViewport(&viewport);
+            }
         }
         const float* sceneView = &view._11;
         const float* sceneProjection = &projection._11;
@@ -745,11 +821,7 @@ namespace wxl_video_screen
         device->SetRenderState(D3DRS_COLORWRITEENABLE, 0x0Fu);
         device->SetRenderState(D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
         device->SetRenderState(D3DRS_ZWRITEENABLE, beforeWorld ? TRUE : FALSE);
-        // Never let terrain hide the diagnostic card.  As soon as live video is connected the user's
-        // occlusion preference applies normally.
-        device->SetRenderState(D3DRS_ZENABLE,
-                               sceneDepth && (beforeWorld || (texture_ && depthTest_))
-                                   ? D3DZB_TRUE : D3DZB_FALSE);
+        device->SetRenderState(D3DRS_ZENABLE, depthTested ? D3DZB_TRUE : D3DZB_FALSE);
         // Build 12340's projection maps near-to-far depth in increasing order.  The live test
         // positions proved the character was between the camera and this quad while GREATER_EQUAL
         // still painted over it: the comparison was reversed.  Match the world's LESS_EQUAL test so
@@ -790,9 +862,12 @@ namespace wxl_video_screen
             }
         }
 
-        device->SetDepthStencilSurface(oldDepth);
-        if (oldDepth) oldDepth->Release();
-        state->Apply();
+        if (depthTested)
+        {
+            device->SetDepthStencilSurface(oldDepth);
+            if (oldDepth) oldDepth->Release();
+        }
+        state->Apply(); // includes the viewport
         state->Release();
     }
 
@@ -960,7 +1035,7 @@ namespace wxl_video_screen
         }
     }
 
-    // After the world, so it blends over what's behind it; depth-tested (characters walk in front), no depth writes.
+    // After the world, so it blends over what's behind it; no depth test, no depth writes.
     void VideoSurface::DrawStonewall(IDirect3DDevice9* device, void* sceneDepthRaw)
     {
         if (!device || !placed_ || !visible_ || !stonewall_ || wxl::game::world::CurrentMapId() != mapId_) return;
@@ -975,13 +1050,18 @@ namespace wxl_video_screen
         world._43 = -eye[2];
         D3DMATRIX view{}, projection{};
         if (!wxl::game::gfx::SceneMatrices(&view._11, &projection._11)) return;
+        float rendered[16];
+        if (RenderProjection(rendered)) std::memcpy(&projection._11, rendered, sizeof(rendered));
 
         IDirect3DStateBlock9* state = nullptr;
         if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &state)) || !state) return;
-        IDirect3DSurface9* oldDepth = nullptr;
-        device->GetDepthStencilSurface(&oldDepth);
-        auto* sceneDepth = static_cast<IDirect3DSurface9*>(sceneDepthRaw);
-        if (sceneDepth) device->SetDepthStencilSurface(sceneDepth);
+        // Not depth-tested (Azeroth Plex 754023c, the same sign): here, at the end of the world pass, the viewport's depth
+        // range is back to 0..1 (the world drew with 0..0.94) and the sign was drawn with SceneMatrices' projection, not
+        // the world's, so it lost the depth test to the terrain behind it (Living Azeroth found the same at this point;
+        // in Azeroth Plex, in game on 2026-10-14, with "Characters and world appear in front" on, the sign and the glow
+        // never showed). Nor is the depth surface swapped: the world text batch (the player names) is drawn straight
+        // after this event.
+        (void)sceneDepthRaw;
 
         device->SetTransform(D3DTS_WORLD, &world);
         device->SetTransform(D3DTS_VIEW, &view);
@@ -1018,7 +1098,7 @@ namespace wxl_video_screen
         device->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
         device->SetRenderState(D3DRS_COLORWRITEENABLE, 0x07u);
         device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
-        device->SetRenderState(D3DRS_ZENABLE, sceneDepth && depthTest_ ? D3DZB_TRUE : D3DZB_FALSE);
+        device->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
         device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
         DWORD noBias = 0;
         device->SetRenderState(D3DRS_DEPTHBIAS, noBias);
@@ -1073,8 +1153,6 @@ namespace wxl_video_screen
         }
         device->SetTexture(0, nullptr);
 
-        device->SetDepthStencilSurface(oldDepth);
-        if (oldDepth) oldDepth->Release();
         state->Apply();
         state->Release();
     }
@@ -1167,12 +1245,13 @@ namespace wxl_video_screen
         }
         char diagnostics[256]{};
         std::snprintf(diagnostics, sizeof(diagnostics),
-                      "World draw: scenes %llu | attempts %llu | success %llu | hr 0x%08lX | frame %ld | helper %s",
+                      "World draw: scenes %llu | attempts %llu | success %llu | hr 0x%08lX | frame %ld | helper %s | %s",
                       static_cast<unsigned long long>(worldSceneCalls_),
                       static_cast<unsigned long long>(drawAttempts_),
                       static_cast<unsigned long long>(drawSuccesses_),
                       static_cast<unsigned long>(lastDrawResult_), lastFrameSequence_,
-                      FindWindowW(kHostWindowClass, nullptr) ? "open" : "closed");
+                      FindWindowW(kHostWindowClass, nullptr) ? "open" : "closed",
+                      !texture_ ? "no texture" : textureMipmapped_ ? "mipmapped" : "no mipmaps");
         api_->UiText(diagnostics);
         char projection[192]{};
         if (projectedCenterValid_)

@@ -78,7 +78,8 @@ namespace wxl_video_screen
         float projectedCenter_[3]{};
         float projectedClipW_ = 0.0f;
         IDirect3DDevice9* textureDevice_ = nullptr;
-        IDirect3DTexture9* texture_ = nullptr;
+        IDirect3DTexture9* texture_ = nullptr;        // what the screen samples
+        IDirect3DTexture9* stagingTexture_ = nullptr; // system memory, UpdateTexture'd into texture_ when it's mipmapped
         bool textureMipmapped_ = false;
         IDirect3DDevice9* stonewallDevice_ = nullptr;
         IDirect3DTexture9* signTexture_ = nullptr;   // the rainbow and "Stonewall"
