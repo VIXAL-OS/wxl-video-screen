@@ -104,7 +104,7 @@ namespace wxl_video_screen
         int depthTest_ = 1;
         int outline_ = 0;
         int stonewall_ = 0;
-        float depthBias_ = -0.010f;
+        float depthPull_ = 0.05f; // yards toward the camera (screen_depth::kDefaultPullYards)
         int spatialAudio_ = 1;
         int masterVolume_ = 80;
         int effectiveVolume_ = 80;

@@ -31,6 +31,12 @@ the same license.
   screen's bias for the client's own; a state block's restore doesn't pass through those hooks, so it wrote the bias
   back for the world pass after the shadow maps, and the terrain was drawn nearer than it is (Living Azeroth's snow
   cover vanished, shadows went wrong).
+- **Depth pull in yards:** the panel's "Depth pull" moves the depth-tested screen that many yards toward the camera
+  (default 0.05, at most 0.15), by scaling view space about the eye in its projection: the same pixels, only nearer
+  depth (`extension/src/ScreenDepth.hpp`). The old "Depth offset" of -0.010 had only looked right because the leaked
+  bias moved the characters with the screen; in the projection alone it brought a screen 18 yd away to 9 yd, over the
+  character standing in front of it. The saved field keeps its old units (pull = -5 x the old value), so the old
+  default -0.010 reads as 0.05 yd.
 - **CyTube channels:** `player.html` opens a CyTube channel link (`https://cytu.be/r/<channel>`) as the page itself,
   since CyTube refuses to load inside a frame; the channel's own sync then drives the video.
 - **CyTube theater mode:** on a channel page (`/r/<channel>` on the hosts `player.html` lists, nowhere else) the helper
