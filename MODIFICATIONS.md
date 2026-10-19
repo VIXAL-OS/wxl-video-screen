@@ -33,6 +33,12 @@ the same license.
   cover vanished, shadows went wrong).
 - **CyTube channels:** `player.html` opens a CyTube channel link (`https://cytu.be/r/<channel>`) as the page itself,
   since CyTube refuses to load inside a frame; the channel's own sync then drives the video.
+- **CyTube theater mode:** on a channel page (`/r/<channel>` on the hosts `player.html` lists, nowhere else) the helper
+  shows only the channel's video area, filling the view, through a script it runs in every page it loads
+  (`host/CytubeTheater.hpp`); it stays that way when the channel swaps players, and the whole page comes back while the
+  troubleshooting window is shown. The panel's Play, Pause, Stop (a pause, in a synced room) and volume reach the
+  channel's player; loading a YouTube link from a channel goes back to `player.html`. Play with nothing loaded yet
+  loads the panel's link.
 
 ## Build files added
 - `ext-build/CMakeLists.txt` builds the extension DLL against wxl-core's sources.

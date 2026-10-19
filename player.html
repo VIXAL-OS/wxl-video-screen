@@ -65,9 +65,9 @@
 
     // CyTube channels (https://cytu.be/r/<channel>, or a self-hosted CyTube server listed here) open as the page
     // itself: CyTube sends X-Frame-Options: DENY, so inside this page's frame it only shows "refused to connect".
-    // The channel's own sync then drives the video. "#wxl-cinema" is added so the channel's JS can tell it's in WoW
-    // (to show only the video). To come back to YouTube, close and reopen Video Cinema (or right-click > Back in the
-    // browser troubleshooting window).
+    // The channel's own sync then drives the video. "#wxl-cinema" is added so the channel's JS can tell it's in WoW.
+    // The helper shows only the channel's video there (host/CytubeTheater.hpp, whose host list must match this one)
+    // and comes back here, with ?load=<link>, when a YouTube link is loaded from the panel.
     const cytubeHosts = ['cytu.be'];
     function cytubeChannel(raw) {
       let url;
@@ -141,8 +141,15 @@
       play();
       return true;
     };
-    window.wxlPlayerCommand = command => {
-      if (!player) return false;
+    // url: the panel's link, sent with Play. Play with nothing loaded yet loads it (or the last link used here).
+    window.wxlPlayerCommand = (command, url) => {
+      if (!player) {
+        const raw = String(url || '').trim() || input.value.trim();
+        if (command !== 'play' || !raw) return false;
+        input.value = raw;
+        play();
+        return true;
+      }
       if (command === 'play' && player.playVideo) player.playVideo();
       else if (command === 'pause' && player.pauseVideo) player.pauseVideo();
       else if (command === 'stop' && player.stopVideo) player.stopVideo();
@@ -163,6 +170,14 @@
     const apiScript = document.createElement('script');
     apiScript.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(apiScript);
+
+    // Back from a CyTube channel with a link to load (the helper's wxlLoadFromNative there).
+    const requested = new URLSearchParams(location.search).get('load');
+    if (requested !== null) {
+      history.replaceState(null, '', location.pathname);
+      input.value = requested;
+      play();
+    }
   </script>
 </body>
 </html>

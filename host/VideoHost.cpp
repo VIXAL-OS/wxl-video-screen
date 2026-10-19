@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "CytubeTheater.hpp"
 #include "VideoShared.hpp"
 
 using Microsoft::WRL::Callback;
@@ -229,6 +230,14 @@ namespace
                 [](HRESULT, LPCWSTR) -> HRESULT { return S_OK; }).Get());
     }
 
+    // CyTube's video only (host/CytubeTheater.hpp) while the helper runs in the background; the whole channel page
+    // while its troubleshooting window is shown.
+    void ApplyTheater()
+    {
+        ExecutePlayerScript(g_background ? L"window.wxlTheater && window.wxlTheater(true);"
+                                         : L"window.wxlTheater && window.wxlTheater(false);");
+    }
+
     void ProcessControls()
     {
         auto* control = SharedControl();
@@ -249,7 +258,9 @@ namespace
                     ExecutePlayerScript(L"window.wxlLoadFromNative(" +
                                         JsonStringFromUtf8(url, length) + L");");
                 else if (command == static_cast<LONG>(wxl_video_shared::Command::Play))
-                    ExecutePlayerScript(L"window.wxlPlayerCommand('play');");
+                    // With the panel's link: Play with nothing loaded yet loads it (player.html).
+                    ExecutePlayerScript(L"window.wxlPlayerCommand('play', " +
+                                        JsonStringFromUtf8(url, length) + L");");
                 else if (command == static_cast<LONG>(wxl_video_shared::Command::Pause))
                     ExecutePlayerScript(L"window.wxlPlayerCommand('pause');");
                 else if (command == static_cast<LONG>(wxl_video_shared::Command::Stop))
@@ -396,6 +407,7 @@ namespace
         SetWindowPos(g_window, HWND_NOTOPMOST, x, y, width, height,
                      SWP_SHOWWINDOW | SWP_FRAMECHANGED);
         SetForegroundWindow(g_window);
+        ApplyTheater();
     }
 
     void HideHostWindow()
@@ -410,6 +422,7 @@ namespace
         // outside the virtual desktop so normal play has no visible companion window or taskbar item.
         SetWindowPos(g_window, HWND_BOTTOM, -32000, -32000, 1280, 720,
                      SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        ApplyTheater();
     }
 
     void CreateWebView()
@@ -491,10 +504,24 @@ namespace
                                                 BOOL succeeded = FALSE;
                                                 if (args) args->get_IsSuccess(&succeeded);
                                                 g_pageReady = succeeded != FALSE;
+                                                if (g_pageReady)
+                                                {
+                                                    // A new page (a CyTube channel, or player.html back from one)
+                                                    // gets the panel's volume again and the right layout.
+                                                    g_lastVolumeSequence = 0;
+                                                    ApplyTheater();
+                                                }
                                                 return S_OK;
                                             }).Get(),
                                         &navigationToken);
                                 }
+                                // CyTube channels show only their video (host/CytubeTheater.hpp; the script
+                                // checks the page's host itself and does nothing anywhere else).
+                                if (g_webview)
+                                    g_webview->AddScriptToExecuteOnDocumentCreated(
+                                        wxl_video_host::CytubeTheaterScript().c_str(),
+                                        Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
+                                            [](HRESULT, LPCWSTR) -> HRESULT { return S_OK; }).Get());
                                 if (FAILED(mappingResult) || !g_webview ||
                                     FAILED(g_webview->Navigate(kPlayerUrl)))
                                 {

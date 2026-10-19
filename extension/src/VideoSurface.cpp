@@ -360,6 +360,12 @@ namespace wxl_video_screen
             }
             strncpy_s(control->url, sizeof(control->url), urlInput_, _TRUNCATE);
         }
+        else if (command == static_cast<LONG>(wxl_video_shared::Command::Play))
+        {
+            // The link goes along: Play with nothing loaded yet loads it (the helper's player.html); an older helper
+            // ignores it.
+            strncpy_s(control->url, sizeof(control->url), urlInput_, _TRUNCATE);
+        }
         InterlockedExchange(&control->command, command);
         MemoryBarrier();
         LONG sequence = control->commandSequence + 1;
