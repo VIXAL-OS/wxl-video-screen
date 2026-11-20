@@ -1,0 +1,5 @@
+## Interface: 30300
+## Title: WarcraftXL Film Club
+## Notes: Controls for Azeroth Plex and Video Cinema
+## Version: 0.1.0
+Film.lua

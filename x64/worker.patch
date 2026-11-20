@@ -1,0 +1,106 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -12,5 +12,5 @@
+ target_include_directories(wxl-video-host PRIVATE "${WEBVIEW2_ROOT}/build/native/include")
+ target_compile_definitions(wxl-video-host PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+ target_link_libraries(wxl-video-host PRIVATE
+-    "${WEBVIEW2_ROOT}/build/native/x86/WebView2LoaderStatic.lib"
++    "${WEBVIEW2_ROOT}/build/native/x64/WebView2LoaderStatic.lib"
+     user32 ole32 oleaut32 shell32 windowscodecs)
+--- /dev/null
++++ b/FilmWorker.h
+@@ -0,0 +1,23 @@
++#pragma once
++#include <windows.h>
++#include <cwchar>
++#include <string>
++
++inline std::wstring filmName(const wchar_t* part, DWORD child) {
++    return L"Local\\WxlFilm-" + std::to_wstring(child) + L"-" + part;
++}
++inline HANDLE filmLifetime = nullptr;
++inline bool filmOpenLifetime(const wchar_t* args) {
++    // The owner creates this event before launch and signals it even on an immediate close.
++    const wchar_t* value = args ? wcsstr(args, L"--lifetime ") : nullptr;
++    if (!value) return false;
++    value += 11;
++    std::wstring suffix(value, wcscspn(value, L" \t"));
++    if (suffix.empty() || suffix.size() > 64 || suffix.find_first_not_of(L"0123456789-") != suffix.npos)
++        return false;
++    filmLifetime = OpenEventW(SYNCHRONIZE, FALSE, (L"Local\\WxlFilm-Life-" + suffix).c_str());
++    return filmLifetime && WaitForSingleObject(filmLifetime, 0) == WAIT_TIMEOUT;
++}
++inline bool filmStopping() {
++    return WaitForSingleObject(filmLifetime, 0) != WAIT_TIMEOUT;
++}
+--- a/VideoHost.cpp
++++ b/VideoHost.cpp
+@@ -1,3 +1,4 @@
++#include "FilmWorker.h"
+ // Local WebView2 helper used by wxl-video-screen.
+ // Copyright (C) 2026 WarcraftXL contributors
+ // SPDX-License-Identifier: GPL-3.0-or-later
+@@ -87,7 +88,7 @@
+         g_controlMapping = CreateFileMappingW(
+             INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+             static_cast<DWORD>(sizeof(wxl_video_shared::ControlBlock)),
+-            wxl_video_shared::kControlMappingName);
++            filmName(L"Control", GetCurrentProcessId()).c_str());
+         if (!g_controlMapping) return false;
+         const bool created = GetLastError() != ERROR_ALREADY_EXISTS;
+         g_controlView = MapViewOfFile(g_controlMapping, FILE_MAP_ALL_ACCESS, 0, 0,
+@@ -119,7 +120,7 @@
+     {
+         g_mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                                        static_cast<DWORD>(wxl_video_shared::kMappingBytes),
+-                                       wxl_video_shared::kMappingName);
++                                       filmName(L"Frames", GetCurrentProcessId()).c_str());
+         if (!g_mapping) return false;
+ 
+         const bool created = GetLastError() != ERROR_ALREADY_EXISTS;
+@@ -266,6 +267,7 @@
+                 else if (command == static_cast<LONG>(wxl_video_shared::Command::Stop))
+                     ExecutePlayerScript(L"window.wxlPlayerCommand('stop');");
+                 g_lastCommandSequence = commandSequence;
++                InterlockedExchange(&control->command, 0);
+             }
+         }
+ 
+@@ -364,13 +366,20 @@
+ 
+     std::wstring LocalDataDirectory()
+     {
++        wchar_t profile[32768];
++        DWORD n = GetEnvironmentVariableW(L"WXLFILM_PROFILE_ROOT", profile, 32768);
++        if (n && n < 32768 && std::filesystem::path(profile).is_absolute()) {
++            auto path = std::filesystem::path(profile) / L"Cinema";
++            std::error_code ec; std::filesystem::create_directories(path, ec);
++            return ec ? std::wstring{} : path.wstring();
++        }
+         wchar_t localAppData[MAX_PATH]{};
+         if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT,
+                                     localAppData)))
+             return {};
+ 
+         const std::filesystem::path path = std::filesystem::path(localAppData) /
+-                                           L"WarcraftXL" / L"video-cinema";
++                                           L"WarcraftXLFilm" / L"video-cinema";
+         std::error_code error;
+         std::filesystem::create_directories(path, error);
+         return error ? std::wstring{} : path.wstring();
+@@ -555,6 +564,7 @@
+             ResizeController();
+             return 0;
+         case WM_TIMER:
++            if (filmStopping()) { PostMessageW(window, WM_CLOSE, 0, 0); return 0; }
+             if (wParam == kCaptureTimer)
+             {
+                 ProcessControls();
+@@ -597,6 +607,7 @@
+ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR commandLine, int showCommand)
+ {
+     g_background = commandLine && std::wcsstr(commandLine, L"--background") != nullptr;
++    if (!filmOpenLifetime(commandLine)) return 8;
+     const DWORD parentPid = ParseParentPid(commandLine);
+     if (parentPid)
+     {

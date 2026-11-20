@@ -1,5 +1,7 @@
 # WXL Video Cinema
 
+**WarcraftXL x64 preview.** The x64 mod and shared **/film** addon install alongside WarcraftXL-Labs x64 ABI 0.1.46, using the existing client executable. [Download the prerelease](https://github.com/VIXAL-OS/wxl-video-screen/releases/tag/film-club-x64-v0.1.0-preview.1) · [x64 build and install instructions](x64/README.md)
+
 Video Cinema is an optional WarcraftXL ABI 1.1 extension for the 32-bit WoW
 3.3.5a build-12340 client. It places a client-local, world-space screen and
 plays an official YouTube embed through a small local WebView2 helper process.

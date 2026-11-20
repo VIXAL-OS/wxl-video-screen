@@ -1,0 +1,27 @@
+{
+  "id": "vixal.videocinema",
+  "name": "Video Cinema",
+  "version": "0.1.0",
+  "abi": "0.1.46",
+  "binaries": {
+    "win-x64": "bin/x64/videocinema.dll"
+  },
+  "requires": [
+    {
+      "service": "wxl.gx",
+      "version": 2
+    },
+    {
+      "service": "wxl.camera",
+      "version": 1
+    },
+    {
+      "service": "wxl.script",
+      "version": 1
+    },
+    {
+      "service": "wxl.cvar",
+      "version": 1
+    }
+  ]
+}
